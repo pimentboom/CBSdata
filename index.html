@@ -48,8 +48,7 @@ h2 {
 </head>
 
 <body>
-<h2>Energieproductie NL – Totaal en Hernieuwbaar</h2>
-<div class="subtitle">Gecombineerde CBS‑datasets 80030NED + 82610NED</div>
+<h2>Energieproductie NL</h2>
 
 <div id="chartWrapper">
   <canvas id="cbsChart"></canvas>
@@ -57,11 +56,8 @@ h2 {
 
 <p class="footer-note">
   Data: CBS Open Data – StatLine  
-  <a href="https://opendata.cbs.nl/ODataApi/OData/80030NED/TypedDataSet?$format=json" target="_blank">
-    80030NED (dataset)
-  </a>
-  <a href="https://opendata.cbs.nl/#/CBS/nl/dataset/80030ned/table?ts=1766853987176" target="_blank">
-    80030NED (CBS site)
+  <a href="https://opendata.cbs.nl/ODataApi/OData/84575NED/TypedDataSet?$format=json" target="_blank">
+    84575NED (dataset)
   </a><br>
   <a href="https://opendata.cbs.nl/ODataApi/OData/82610NED/TypedDataSet?$top=50000" target="_blank">
     82610NED (hernieuwbaar)
@@ -73,14 +69,12 @@ h2 {
 (async () => {
 
   const URL_FOSSIEL =
-    "https://opendata.cbs.nl/ODataApi/OData/80030NED/TypedDataSet?$format=json";
+    "https://opendata.cbs.nl/ODataApi/OData/84575NED/TypedDataSet?$format=json";
 
   const URL_HERNIEUWBAAR =
     "https://opendata.cbs.nl/ODataApi/OData/82610NED/TypedDataSet?$top=50000";
 
-  const VALUE_FOSSIEL = "ElektriciteitMWh_2";
-  const PRODUCTIE_FILTER = "E007022";
-  const ENERGIEDRAGER_FILTER = "T001027";
+  const VALUE_FOSSIEL = "NettoVerbruikBerekend_30";;
 
   const VALUE_HERNIEUWBAAR = "NettoElektriciteitsproductie_3";
 
@@ -143,15 +137,15 @@ h2 {
     ]);
 
     const fossielRows = rowsFossiel.filter(r =>
-      (r.CentraleDecentraleProductie || "").trim() === PRODUCTIE_FILTER &&
-      (r.Energiedragers || "").trim() === ENERGIEDRAGER_FILTER &&
+      typeof r.Perioden === "string" &&
+      r.Perioden.endsWith("JJ00") &&
       r[VALUE_FOSSIEL] !== null &&
       !isNaN(Number(r[VALUE_FOSSIEL]))
     );
 
     const mapFossiel = aggregateByYear(fossielRows, VALUE_FOSSIEL);
     // Correctie: 
-    mapFossiel.forEach((v, y) => mapFossiel.set(y, v / 1000000));
+    mapFossiel.forEach((v, y) => mapFossiel.set(y, v / 1000));
 
     const perBron = [];
     const allYearsSet = new Set([...mapFossiel.keys()]);
