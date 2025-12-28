@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<!--
+Logica:
+- Haalt alle records op via de https://opendata.cbs.nl/#/CBS/nl/dataset/82610ned/table?ts=1766574294604
+- Bepaalt alle jaren in de dataset, selecteert:
+  * alle jaren deelbaar door 5 tot en met (maxJaar - 5)
+  * plus de laatste 5 jaren afzonderlijk
+- Combineert deze jaren tot één geordende x-as zonder duplicaten en toont ze als staafdiagram.
+-->
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<title>Duurzame energie NL</title>
+<!-- Chart.js via CDN -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+/* Basisstyling, geschikt voor Home Assistant iframe/webpage card */
+:root {
+  color-scheme: light dark;
+}
+body {
+  margin: 0;
+  padding: 10px;
+  font-family: Arial, sans-serif;
+  background: #f5f5f5;
+  color: #222;
+  box-sizing: border-box;
+}
+h2 {
+  margin: 0 0 6px 0;
+  font-size: 18px;
+  text-align: center;
+}
+.subtitle {
+  margin: 0 0 10px 0;
+  font-size: 12px;
+  text-align: center;
+  color: #555;
+}
+#chartWrapper {
+  position: relative;
+  width: 100%;
+  /* Hoogte relatief aan viewport zodat het netjes schaalt in een card */
+  height: 55vh;
+  max-height: 450px;
+  min-height: 220px;
+}
+#chartWrapper canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+.footer-note {
+  margin-top: 6px;
+  font-size: 10px;
+  text-align: center;
+  color: #777;
+}
+</style>
+</head>
+<body>
+<h2>Duurzame energie NL</h2>
+<div id="chartWrapper">
+  <canvas id="cbsChart"></canvas>
+</div>
+<p class="footer-note">
+Data: CBS Open Data – StatLine 82610NED (hernieuwbare elektriciteit; productie en vermogen, provincie)
+</p>
+
+<script>
+(async () => {
+  // ========================
+  // CONFIGURATIE
+  // ========================
+
+  const DATA_URL =
+    "https://opendata.cbs.nl/ODataApi/OData/82610NED/TypedDataSet?$top=50000";
+
+  const VALUE_FIELD = "NettoElektriciteitsproductie_3";
+
+  // ⭐ Drie bronnen combineren
+  const BRONNEN = [
+    { code: "E006590", label: "Zonnestroom" },
+    { code: "E006637", label: "Wind op land" },
+    { code: "E006638", label: "Wind op zee" },
+    { code: "E006566", label: "Biomassa" }
+  ];
+
+  const CHART_CANVAS_ID = "cbsChart";
+
+  // ========================
+  // HULPFUNCTIES
+  // ========================
+
+  async function fetchCbsData() {
+    const response = await fetch(DATA_URL);
+    if (!response.ok) {
+      throw new Error("Fout bij ophalen CBS-data: " + response.status);
+    }
+    const json = await response.json();
+    return json.value || [];
+  }
+
+  function getYearFromPeriod(periodCode) {
+    if (!periodCode) return null;
+    const y = parseInt(periodCode.substring(0, 4), 10);
+    return isNaN(y) ? null : y;
+  }
+
+  function aggregateByYear(rows) {
+    const map = new Map();
+    rows.forEach(row => {
+      const year = getYearFromPeriod(row.Perioden);
+      if (!year) return;
+      const val = (Number(row[VALUE_FIELD]) || 0) / 1_000;
+      map.set(year, (map.get(year) || 0) + val);
+    });
+    const years = [...map.keys()].sort((a, b) => a - b);
+    return { years, map };
+  }
+
+  function selectYearsForXAxis(allYears) {
+    if (!allYears.length) return [];
+    const sorted = [...allYears].sort((a, b) => a - b);
+    const minY = sorted[0];
+    const maxY = sorted[sorted.length - 1];
+    const cutoff = maxY - 1;
+
+    const fiveSteps = [];
+    for (let y = minY; y <= cutoff; y++) {
+      if (y % 5 === 0) fiveSteps.push(y);
+    }
+    
+    // laatste jaar
+    const lastYears = [maxY];
+
+    //const lastYears = [];
+    //for (let y = maxY - 4; y <= maxY; y++) {
+    //  if (sorted.includes(y)) lastYears.push(y);
+    //}
+
+    return [...new Set([...fiveSteps, ...lastYears])].sort((a, b) => a - b);
+  }
+
+  function buildChartData(selectedYears, yearMap) {
+    return selectedYears.map(y => yearMap.get(y) || 0);
+  }
+
+  function renderChart(labels, datasets) {
+    const ctx = document.getElementById(CHART_CANVAS_ID).getContext("2d");
+
+    if (window.__cbsChartInstance) {
+      window.__cbsChartInstance.destroy();
+    }
+
+    window.__cbsChartInstance = new Chart(ctx, {
+      type: "bar",
+      data: {
+        labels,
+        datasets
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { position: "bottom" }
+        },
+        scales: {
+          x: { 
+              stacked: true,   // ⭐ kolommen op elkaar
+              title: { display: true, text: "Jaar" } },
+          y: {
+            stacked: true,   // ⭐ waarden optellen
+            beginAtZero: true,
+            title: { display: true, text: "elektriciteitsproductie (x1000 GWh)" }
+          }
+        }
+      }
+    });
+  }
+
+  // ========================
+  // HOOFDLOGICA
+  // ========================
+
+  try {
+    const allRows = await fetchCbsData();
+
+    // Verzamel alle jaren uit alle bronnen
+    const allYearsSet = new Set();
+    const perBron = [];
+
+    for (const bron of BRONNEN) {
+      const rows = allRows.filter(r =>
+        (r.BronTechniek || "").trim() === bron.code &&
+        r[VALUE_FIELD] !== null &&
+        !isNaN(Number(r[VALUE_FIELD]))
+      );
+
+      const { years, map } = aggregateByYear(rows);
+      years.forEach(y => allYearsSet.add(y));
+
+      perBron.push({ bron, years, map });
+    }
+
+    const allYears = [...allYearsSet].sort((a, b) => a - b);
+    const selectedYears = selectYearsForXAxis(allYears);
+
+    // Chart.js datasets genereren
+    const datasets = perBron.map((entry, idx) => {
+      const color = [
+        "rgba(255, 193, 7, 0.6)",   // zonnestroom
+        "rgba(25, 193, 7, 0.6)",    // wind land
+        "rgba(7, 112, 193, 0.6)",    // wind zee
+        "rgba(139, 69, 19, 0.6)"     //Biomassa
+      ][idx];
+
+      const border = color.replace("0.6", "1");
+
+      return {
+        label: entry.bron.label,
+        data: buildChartData(selectedYears, entry.map),
+        backgroundColor: color,
+        borderColor: border,
+        borderWidth: 1
+      };
+    });
+
+    renderChart(selectedYears.map(String), datasets);
+
+  } catch (err) {
+    console.error("Fout in CBS-visualisatie:", err);
+    document.getElementById("chartWrapper").innerHTML =
+      "<p style='font-size:12px;color:#b00;text-align:center;'>Fout bij laden CBS-data.</p>";
+  }
+})();
+</script>
+</body>
+</html>
+
