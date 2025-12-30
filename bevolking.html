@@ -159,7 +159,7 @@ Data: CBS Open Data – StatLine 85496NED (Bevolking; kerncijfers)
     const datasets = FIELDS.map((f, i) => {
     const map = aggregate(rows, f.key, f.factor);
     return {
-        label: `${f.label} (÷${f.factor})`,
+        label: `${f.label}`,
         data: selectedYears.map(y => map.get(y) || 0),
         backgroundColor: COLORS[i],
         borderColor: COLORS[i].replace("0.6", "1"),
